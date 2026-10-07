@@ -1,0 +1,11 @@
+[Unit]
+Description=Check vimalender upcoming events every minute
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=1min
+AccuracySec=15s
+Unit=vimalender-notify.service
+
+[Install]
+WantedBy=timers.target

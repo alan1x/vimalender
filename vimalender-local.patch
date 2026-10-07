@@ -470,7 +470,7 @@ index b81650c..f407f43 100644
  }
  
 diff --git a/internal/storage.go b/internal/storage.go
-index c2b05ec..0b85c53 100644
+index c2b05ec..7c3aa1d 100644
 --- a/internal/storage.go
 +++ b/internal/storage.go
 @@ -134,11 +134,13 @@ func DefaultKeybindingHelp() map[string]string {
@@ -487,3 +487,47 @@ index c2b05ec..0b85c53 100644
  		"x":      "cut",
  		"y":      "copy",
  	}
+@@ -295,8 +297,12 @@ func SaveSettings(s Settings) error {
+ // LoadEvents reads events from the JSON file.
+ // Returns an empty store and an error message if the file is malformed.
+ func LoadEvents() (*EventStore, string) {
++	return loadEventsFile(DataFilePath())
++}
++
++// loadEventsFile reads events from the given JSON file path.
++func loadEventsFile(path string) (*EventStore, string) {
+ 	store := NewEventStore()
+-	path := DataFilePath()
+ 
+ 	data, err := os.ReadFile(path)
+ 	if err != nil {
+diff --git a/main.go b/main.go
+index edd3081..e8eb0ca 100644
+--- a/main.go
++++ b/main.go
+@@ -9,6 +9,11 @@ import (
+ )
+ 
+ func main() {
++	// Non-interactive subcommand: check for upcoming events and notify.
++	if len(os.Args) > 1 && os.Args[1] == "notify" {
++		os.Exit(internal.RunNotify(os.Args[2:]))
++	}
++
+ 	p := tea.NewProgram(
+ 		internal.NewModel(),
+ 		tea.WithAltScreen(),
+diff --git a/rebuild.sh b/rebuild.sh
+new file mode 100755
+index 0000000..760111f
+--- /dev/null
++++ b/rebuild.sh
+@@ -0,0 +1,8 @@
++#!/bin/sh
++# Rebuild the locally patched vimalender and install it into ~/go/bin.
++set -e
++cd "$(dirname "$0")"
++out="$HOME/go/bin/.vimalender.new"
++go build -o "$out" .
++mv -f "$out" "$HOME/go/bin/vimalender"
++echo "OK: $HOME/go/bin/vimalender rebuilt and installed."

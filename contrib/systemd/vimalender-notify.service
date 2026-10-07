@@ -1,0 +1,11 @@
+[Unit]
+Description=vimalender upcoming-event notifications (one-shot check)
+After=graphical-session.target
+PartOf=graphical-session.target
+
+[Service]
+Type=oneshot
+ExecStart=%h/go/bin/vimalender notify --lead 60,20
+SyslogIdentifier=vimalender-notify
+MemoryMax=50M
+NoNewPrivileges=true

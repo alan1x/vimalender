@@ -9,6 +9,11 @@ import (
 )
 
 func main() {
+	// Non-interactive subcommand: check for upcoming events and notify.
+	if len(os.Args) > 1 && os.Args[1] == "notify" {
+		os.Exit(internal.RunNotify(os.Args[2:]))
+	}
+
 	p := tea.NewProgram(
 		internal.NewModel(),
 		tea.WithAltScreen(),

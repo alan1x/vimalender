@@ -297,8 +297,12 @@ func SaveSettings(s Settings) error {
 // LoadEvents reads events from the JSON file.
 // Returns an empty store and an error message if the file is malformed.
 func LoadEvents() (*EventStore, string) {
+	return loadEventsFile(DataFilePath())
+}
+
+// loadEventsFile reads events from the given JSON file path.
+func loadEventsFile(path string) (*EventStore, string) {
 	store := NewEventStore()
-	path := DataFilePath()
 
 	data, err := os.ReadFile(path)
 	if err != nil {
