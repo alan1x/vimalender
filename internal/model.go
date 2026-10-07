@@ -79,6 +79,7 @@ type Model struct {
 	cursorCol      int       // 0..dayCount-1, which day column
 	cursorMin      int       // 0-1439, which minute
 	viewportOffset int       // first visible minute in viewport
+	renderEvents   []Event   // events of the day column being rendered (per-event colors)
 	store          *EventStore
 	width          int
 	height         int
@@ -1091,6 +1092,7 @@ func (m Model) handleEditorResult(msg editorResultMsg) (tea.Model, tea.Cmd) {
 	m.store.events[key][baseIdx].StartMin = msg.startMin
 	m.store.events[key][baseIdx].EndMin = msg.endMin
 	m.store.events[key][baseIdx].Notes = msg.notes
+	m.store.events[key][baseIdx].Color = msg.color
 	m.store.events[key][baseIdx].Recurrence = msg.recurrence
 	m.store.events[key][baseIdx].RecurUntilStr = msg.recurUntil
 	m.saveEvents()
@@ -1608,6 +1610,18 @@ func (m Model) updateNavigate(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			}
 			m.resetOverlapIndex()
 		}
+
+	case IsKey(msg, KeyW):
+		// Jump one week forward: shift the whole window (+7 days), keeping the
+		// cursor's day column and time.
+		m.windowStart = m.windowStart.AddDate(0, 0, 7)
+		m.resetOverlapIndex()
+
+	case IsKey(msg, KeyShiftW):
+		// Jump one week backward: shift the whole window (-7 days), keeping the
+		// cursor's day column and time.
+		m.windowStart = m.windowStart.AddDate(0, 0, -7)
+		m.resetOverlapIndex()
 
 	case IsKey(msg, KeyJ):
 		step := m.jumpStep()
@@ -3035,6 +3049,8 @@ func helpRows() []helpRow {
 		{"Week View", KeyJ, DisplayKey(KeyJ), "Move down", "week and visual navigation", true},
 		{"Week View", KeyK, DisplayKey(KeyK), "Move up", "week and visual navigation", true},
 		{"Week View", KeyL, DisplayKey(KeyL), "Move right", "week and visual navigation", true},
+		{"Week View", KeyW, DisplayKey(KeyW), "Next week", "jump 7 days forward", true},
+		{"Week View", KeyShiftW, DisplayKey(KeyShiftW), "Prev week", "jump 7 days back", true},
 		{"Week View", KeyCtrlD, DisplayKey(KeyCtrlD), "Half page down", "week and visual navigation", true},
 		{"Week View", KeyCtrlU, DisplayKey(KeyCtrlU), "Half page up", "week and visual navigation", true},
 		{"Week View", KeyShiftJ, DisplayKey(KeyShiftJ), "Step minute down", "also expands create/visual", true},

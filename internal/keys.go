@@ -43,6 +43,8 @@ const (
 	KeyTab      = "tab"    // cycle overlapping events
 	KeyS        = "s"      // edit menu in adjust mode
 	KeyU        = "u"      // undo
+	KeyW        = "w"      // jump one week forward
+	KeyShiftW   = "W"      // jump one week backward
 	KeyCtrlD    = "ctrl+d" // half page down
 	KeyCtrlU    = "ctrl+u" // half page up
 	KeyCtrlP    = "ctrl+p" // previous search match
@@ -97,6 +99,8 @@ func DefaultKeybindings() map[string]string {
 		KeySpace,
 		KeyTab,
 		KeyU,
+		KeyW,
+		KeyShiftW,
 		KeyX,
 		KeyY,
 	}

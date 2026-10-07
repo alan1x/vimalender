@@ -1,0 +1,489 @@
+diff --git a/internal/editor.go b/internal/editor.go
+index a5f1dbc..2e5e0b1 100644
+--- a/internal/editor.go
++++ b/internal/editor.go
+@@ -20,6 +20,7 @@ type editorResultMsg struct {
+ 	startMin   int
+ 	endMin     int
+ 	notes      string
++	color      string
+ 	recurrence string
+ 	recurUntil string
+ 	err        error
+@@ -72,7 +73,7 @@ func (m *Model) openEditor(date time.Time, index int) tea.Cmd {
+ 		if err != nil {
+ 			return editorResultMsg{date: date, index: index, err: err}
+ 		}
+-		title, desc, startMin, endMin, notes, recurrence, recurUntil, parseErr := parseEditorResult(tmpPath)
++		title, desc, startMin, endMin, notes, color, recurrence, recurUntil, parseErr := parseEditorResult(tmpPath)
+ 		return editorResultMsg{
+ 			date:       date,
+ 			index:      index,
+@@ -81,6 +82,7 @@ func (m *Model) openEditor(date time.Time, index int) tea.Cmd {
+ 			startMin:   startMin,
+ 			endMin:     endMin,
+ 			notes:      notes,
++			color:      color,
+ 			recurrence: recurrence,
+ 			recurUntil: recurUntil,
+ 			err:        parseErr,
+@@ -111,6 +113,7 @@ func formatEventForEditor(ev Event) string {
+ 	} else {
+ 		sb.WriteString("Until: \n")
+ 	}
++	sb.WriteString(fmt.Sprintf("Color: %s\n", ev.Color))
+ 	sb.WriteString("\n")
+ 	sb.WriteString("# Edit the fields above using these formats:\n")
+ 	sb.WriteString("#   Title: free text\n")
+@@ -119,6 +122,7 @@ func formatEventForEditor(ev Event) string {
+ 	sb.WriteString("#   End: HH:MM\n")
+ 	sb.WriteString("#   Repeat: None, Daily, Weekdays, Weekly, Biweekly, Monthly, Yearly\n")
+ 	sb.WriteString("#   Until: YYYY-MM-DD or leave blank\n")
++	sb.WriteString("#   Color: hex like #a51d2d (blank = global event color)\n")
+ 	sb.WriteString("#\n")
+ 	sb.WriteString("# Write longer notes under the --- separator below.\n")
+ 	sb.WriteString("---\n")
+@@ -128,10 +132,10 @@ func formatEventForEditor(ev Event) string {
+ }
+ 
+ // parseEditorResult reads the temp file and extracts event fields.
+-func parseEditorResult(path string) (title string, desc string, startMin, endMin int, notes string, recurrence string, recurUntil string, err error) {
++func parseEditorResult(path string) (title string, desc string, startMin, endMin int, notes string, color string, recurrence string, recurUntil string, err error) {
+ 	data, err := os.ReadFile(path)
+ 	if err != nil {
+-		return "", "", 0, 0, "", "", "", fmt.Errorf("read editor file: %w", err)
++		return "", "", 0, 0, "", "", "", "", fmt.Errorf("read editor file: %w", err)
+ 	}
+ 
+ 	content := string(data)
+@@ -156,18 +160,20 @@ func parseEditorResult(path string) (title string, desc string, startMin, endMin
+ 			val := strings.TrimSpace(strings.TrimPrefix(line, "Start:"))
+ 			startMin, err = parseTime(val)
+ 			if err != nil {
+-				return "", "", 0, 0, "", "", "", fmt.Errorf("invalid start time %q: %w", val, err)
++				return "", "", 0, 0, "", "", "", "", fmt.Errorf("invalid start time %q: %w", val, err)
+ 			}
+ 		} else if strings.HasPrefix(line, "End:") {
+ 			val := strings.TrimSpace(strings.TrimPrefix(line, "End:"))
+ 			endMin, err = parseTime(val)
+ 			if err != nil {
+-				return "", "", 0, 0, "", "", "", fmt.Errorf("invalid end time %q: %w", val, err)
++				return "", "", 0, 0, "", "", "", "", fmt.Errorf("invalid end time %q: %w", val, err)
+ 			}
+ 		} else if strings.HasPrefix(line, "Repeat:") {
+ 			repeatLabel = strings.TrimSpace(strings.TrimPrefix(line, "Repeat:"))
+ 		} else if strings.HasPrefix(line, "Until:") {
+ 			recurUntil = strings.TrimSpace(strings.TrimPrefix(line, "Until:"))
++		} else if strings.HasPrefix(line, "Color:") {
++			color = normalizeHexColor(strings.TrimSpace(strings.TrimPrefix(line, "Color:")))
+ 		}
+ 	}
+ 
+@@ -177,7 +183,30 @@ func parseEditorResult(path string) (title string, desc string, startMin, endMin
+ 	if title == "" {
+ 		title = "Untitled"
+ 	}
+-	return title, desc, startMin, endMin, notes, recurrence, recurUntil, nil
++	return title, desc, startMin, endMin, notes, color, recurrence, recurUntil, nil
++}
++
++// normalizeHexColor accepts "#rgb", "#rrggbb" (also bare without '#') and
++// returns a normalized "#rrggbb"-style string, or "" when invalid/blank.
++func normalizeHexColor(s string) string {
++	s = strings.TrimSpace(s)
++	if s == "" {
++		return ""
++	}
++	if !strings.HasPrefix(s, "#") {
++		s = "#" + s
++	}
++	switch len(s) {
++	case 4, 7, 9: // #rgb, #rrggbb, #rrggbbaa
++	default:
++		return ""
++	}
++	for _, r := range s[1:] {
++		if !strings.ContainsRune("0123456789abcdefABCDEF", r) {
++			return ""
++		}
++	}
++	return s
+ }
+ 
+ // parseLabelToRecurrence converts a human-readable label back to a recurrence constant.
+diff --git a/internal/event.go b/internal/event.go
+index 2098492..7f5fdc4 100644
+--- a/internal/event.go
++++ b/internal/event.go
+@@ -53,6 +53,7 @@ type Event struct {
+ 	StartMin       int       `json:"start_min"`
+ 	EndMin         int       `json:"end_min"`
+ 	Notes          string    `json:"notes"`
++	Color          string    `json:"color,omitempty"` // optional per-event hex color; "" = global event_color
+ 	ID             string    `json:"id,omitempty"`
+ 	GroupID        string    `json:"group_id,omitempty"`
+ 	Recurrence     string    `json:"recurrence,omitempty"`
+@@ -856,9 +857,9 @@ func (s *EventStore) EventCount(date time.Time) int {
+ 
+ // SearchMatch represents a search result.
+ type SearchMatch struct {
+-	Date    time.Time
+-	Index   int // index in GetByDate results for this date
+-	EventID string
++	Date     time.Time
++	StartMin int // event start minute; orders matches within the same day
++	EventID  string
+ }
+ 
+ // AllEvents returns all events across all dates.
+diff --git a/internal/grid.go b/internal/grid.go
+index e6da93a..1a9a62d 100644
+--- a/internal/grid.go
++++ b/internal/grid.go
+@@ -55,6 +55,7 @@ func colWidthForIndex(col, dayCount, availWidth int) int {
+ // RenderGrid renders the day grid with time gutter.
+ // Each row represents MinutesPerRow() minutes.
+ func RenderGrid(m *Model) string {
++	m.renderEvents = nil // reset per-event color context for this frame
+ 	gutterWidth := 6
+ 	availWidth := m.width - gutterWidth
+ 
+@@ -343,7 +344,7 @@ func renderAllDaySegmentCell(m *Model, width int, left, right string, isStart, s
+ 		bg = "#2a2a3e"
+ 		fg = "#ffffff"
+ 	}
+-	barColor := eventColor(m, 0)
++	barColor := globalEventColor(m)
+ 	if selected {
+ 		barColor = m.uiColor("accent", barColor)
+ 	}
+@@ -672,6 +673,7 @@ func renderCell(m *Model, col, rowStartMin, rowEndMin, colWidth int,
+ 	layout map[int]EventLayout, events []Event, createLayout createPreviewLayout, showNowLine bool, suppressDecorations bool, visualRowIndex int, extraBeforeByRow []int) string {
+ 
+ 	isCursorRow := !suppressDecorations && col == m.cursorCol && m.cursorMin >= rowStartMin && m.cursorMin < rowEndMin
++	m.renderEvents = events // per-event colors resolve against this column's list
+ 	isVisualCell := isVisualCellSelected(m, col, rowStartMin, rowEndMin)
+ 
+ 	// Check create preview
+@@ -997,27 +999,40 @@ func renderCreateWithEvents(m *Model, col int, hits []eventHit,
+ 	return strings.Join(subCols, "")
+ }
+ 
+-// eventColorStyle returns a style for an event using the first color in the palette.
++// eventColorStyle returns a style for an event at idx in the column being
++// rendered, honoring a per-event color when one is set.
+ func eventColorStyle(m *Model, idx int) lipgloss.Style {
+-	_ = idx
+-	bg := m.settings.EventColor
+-	if bg == "" {
+-		bg = DefaultEventColor
+-	}
+ 	return lipgloss.NewStyle().
+-		Background(lipgloss.Color(bg)).
++		Background(lipgloss.Color(eventColor(m, idx))).
+ 		Foreground(lipgloss.Color("#ffffff"))
+ }
+ 
+-// eventColor returns the hex color for an event.
+-func eventColor(m *Model, idx int) string {
+-	_ = idx
++// globalEventColor returns the configured global event color.
++func globalEventColor(m *Model) string {
+ 	if m.settings.EventColor != "" {
+ 		return m.settings.EventColor
+ 	}
+ 	return DefaultEventColor
+ }
+ 
++// eventColorOf returns the display color for a specific event: its own color
++// if set, otherwise the global event color.
++func eventColorOf(m *Model, ev Event) string {
++	if ev.Color != "" {
++		return ev.Color
++	}
++	return globalEventColor(m)
++}
++
++// eventColor returns the hex color for the event at idx in the day column
++// currently being rendered: its own color if set, otherwise the global one.
++func eventColor(m *Model, idx int) string {
++	if idx >= 0 && idx < len(m.renderEvents) {
++		return eventColorOf(m, m.renderEvents[idx])
++	}
++	return globalEventColor(m)
++}
++
+ // EventRowPos indicates where a row falls within an event's visual span.
+ type EventRowPos int
+ 
+@@ -1189,7 +1204,7 @@ func renderNowLineSearchSelectedContent(m *Model, _ int, width int, pos EventRow
+ }
+ 
+ func renderNowLineAdjustContent(m *Model, width int, pos EventRowPos) string {
+-	return renderNowLineBox(m, m.uiColor("accent", eventColor(m, 0)), eventBGColor(m), width, borderBarChar(m, pos))
++	return renderNowLineBox(m, m.uiColor("accent", globalEventColor(m)), eventBGColor(m), width, borderBarChar(m, pos))
+ }
+ 
+ func renderNowLineCreatePreviewContent(m *Model, width int) string {
+@@ -1252,7 +1267,7 @@ func renderSearchSelectedContent(m *Model, idx int, text string, width int, pos
+ 
+ // renderAdjustContent renders an event in move mode with themed accent styling.
+ func renderAdjustContent(m *Model, text string, width int, pos EventRowPos, rowStartMin int, fill rowFill) string {
+-	adjustColor := m.uiColor("accent", eventColor(m, 0))
++	adjustColor := m.uiColor("accent", globalEventColor(m))
+ 	bgColor := eventBGColor(m)
+ 	if pos == EventRowSingle {
+ 		mpr := m.MinutesPerRow()
+diff --git a/internal/keys.go b/internal/keys.go
+index fab7bab..d83779a 100644
+--- a/internal/keys.go
++++ b/internal/keys.go
+@@ -43,6 +43,8 @@ const (
+ 	KeyTab      = "tab"    // cycle overlapping events
+ 	KeyS        = "s"      // edit menu in adjust mode
+ 	KeyU        = "u"      // undo
++	KeyW        = "w"      // jump one week forward
++	KeyShiftW   = "W"      // jump one week backward
+ 	KeyCtrlD    = "ctrl+d" // half page down
+ 	KeyCtrlU    = "ctrl+u" // half page up
+ 	KeyCtrlP    = "ctrl+p" // previous search match
+@@ -97,6 +99,8 @@ func DefaultKeybindings() map[string]string {
+ 		KeySpace,
+ 		KeyTab,
+ 		KeyU,
++		KeyW,
++		KeyShiftW,
+ 		KeyX,
+ 		KeyY,
+ 	}
+diff --git a/internal/model.go b/internal/model.go
+index a50400e..617e1dc 100644
+--- a/internal/model.go
++++ b/internal/model.go
+@@ -79,6 +79,7 @@ type Model struct {
+ 	cursorCol      int       // 0..dayCount-1, which day column
+ 	cursorMin      int       // 0-1439, which minute
+ 	viewportOffset int       // first visible minute in viewport
++	renderEvents   []Event   // events of the day column being rendered (per-event colors)
+ 	store          *EventStore
+ 	width          int
+ 	height         int
+@@ -1091,6 +1092,7 @@ func (m Model) handleEditorResult(msg editorResultMsg) (tea.Model, tea.Cmd) {
+ 	m.store.events[key][baseIdx].StartMin = msg.startMin
+ 	m.store.events[key][baseIdx].EndMin = msg.endMin
+ 	m.store.events[key][baseIdx].Notes = msg.notes
++	m.store.events[key][baseIdx].Color = msg.color
+ 	m.store.events[key][baseIdx].Recurrence = msg.recurrence
+ 	m.store.events[key][baseIdx].RecurUntilStr = msg.recurUntil
+ 	m.saveEvents()
+@@ -1609,6 +1611,18 @@ func (m Model) updateNavigate(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+ 			m.resetOverlapIndex()
+ 		}
+ 
++	case IsKey(msg, KeyW):
++		// Jump one week forward: shift the whole window (+7 days), keeping the
++		// cursor's day column and time.
++		m.windowStart = m.windowStart.AddDate(0, 0, 7)
++		m.resetOverlapIndex()
++
++	case IsKey(msg, KeyShiftW):
++		// Jump one week backward: shift the whole window (-7 days), keeping the
++		// cursor's day column and time.
++		m.windowStart = m.windowStart.AddDate(0, 0, -7)
++		m.resetOverlapIndex()
++
+ 	case IsKey(msg, KeyJ):
+ 		step := m.jumpStep()
+ 		m.cursorMin += step
+@@ -3035,6 +3049,8 @@ func helpRows() []helpRow {
+ 		{"Week View", KeyJ, DisplayKey(KeyJ), "Move down", "week and visual navigation", true},
+ 		{"Week View", KeyK, DisplayKey(KeyK), "Move up", "week and visual navigation", true},
+ 		{"Week View", KeyL, DisplayKey(KeyL), "Move right", "week and visual navigation", true},
++		{"Week View", KeyW, DisplayKey(KeyW), "Next week", "jump 7 days forward", true},
++		{"Week View", KeyShiftW, DisplayKey(KeyShiftW), "Prev week", "jump 7 days back", true},
+ 		{"Week View", KeyCtrlD, DisplayKey(KeyCtrlD), "Half page down", "week and visual navigation", true},
+ 		{"Week View", KeyCtrlU, DisplayKey(KeyCtrlU), "Half page up", "week and visual navigation", true},
+ 		{"Week View", KeyShiftJ, DisplayKey(KeyShiftJ), "Step minute down", "also expands create/visual", true},
+diff --git a/internal/month.go b/internal/month.go
+index 2d59cab..317cd1a 100644
+--- a/internal/month.go
++++ b/internal/month.go
+@@ -2,6 +2,7 @@ package internal
+ 
+ import (
+ 	"fmt"
++	"sort"
+ 	"strings"
+ 	"time"
+ 
+@@ -235,23 +236,36 @@ func RenderMonth(m *Model) string {
+ 							cellContent = todayNumStyle.Render(cellContent)
+ 						}
+ 					} else if eventCount > 0 {
+-						// Day number in normal, dots in color
++						// Day number in normal, dots in each event's color
+ 						plain := fmt.Sprintf(" %2d ", currentDay)
++						evs := m.store.GetByDate(date)
++						sort.SliceStable(evs, func(i, j int) bool { return evs[i].StartMin < evs[j].StartMin })
++						maxDots := 3
++						if cellWidth >= 14 {
++							maxDots = 5
++						}
+ 						dots := ""
+-						for i := 0; i < eventCount && i < 3; i++ {
+-							dots += "●"
++						visible := 0
++						for i := 0; i < len(evs) && i < maxDots; i++ {
++							dots += monthDotStyle(m, evs[i], isCursorWeek).Render("●")
++							visible++
+ 						}
+-						if eventCount > 3 {
+-							dots += "+"
++						if len(evs) > maxDots {
++							moreStyle := eventDotStyle
++							if isCursorWeek {
++								moreStyle = weekHighlightDot
++							}
++							dots += moreStyle.Render("+")
++							visible++
+ 						}
+-						remaining := cellWidth - len(plain) - len([]rune(dots))
++						remaining := cellWidth - len(plain) - visible
+ 						if remaining < 0 {
+ 							remaining = 0
+ 						}
+ 						if isCursorWeek {
+-							cellContent = weekHighlightDay.Render(plain) + weekHighlightDot.Render(dots) + weekHighlightBg.Render(fmt.Sprintf("%-*s", remaining, ""))
++							cellContent = weekHighlightDay.Render(plain) + dots + weekHighlightBg.Render(fmt.Sprintf("%-*s", remaining, ""))
+ 						} else {
+-							cellContent = dayNumStyle.Render(plain) + eventDotStyle.Render(dots) + fmt.Sprintf("%-*s", remaining, "")
++							cellContent = dayNumStyle.Render(plain) + dots + fmt.Sprintf("%-*s", remaining, "")
+ 						}
+ 					} else {
+ 						if isCursorWeek {
+@@ -263,6 +277,7 @@ func RenderMonth(m *Model) string {
+ 				} else if line == 1 && eventCount > 0 {
+ 					// Second line: show first event title (truncated)
+ 					events := m.store.GetByDate(date)
++					sort.SliceStable(events, func(i, j int) bool { return events[i].StartMin < events[j].StartMin })
+ 					title := events[0].Title
+ 					maxLen := cellWidth - 2
+ 					if maxLen < 1 {
+@@ -308,6 +323,17 @@ func RenderMonth(m *Model) string {
+ 	return content
+ }
+ 
++// monthDotStyle returns the style for one event marker dot in month view,
++// using the event's own color (or the global fallback) and preserving the
++// cursor-week background highlight when needed.
++func monthDotStyle(m *Model, ev Event, highlight bool) lipgloss.Style {
++	st := lipgloss.NewStyle().Foreground(lipgloss.Color(eventColorOf(m, ev)))
++	if highlight {
++		st = st.Background(lipgloss.Color("234"))
++	}
++	return st
++}
++
+ // centerText centers text within a given width.
+ func centerText(s string, width int) string {
+ 	if len(s) >= width {
+diff --git a/internal/search.go b/internal/search.go
+index b81650c..f407f43 100644
+--- a/internal/search.go
++++ b/internal/search.go
+@@ -152,31 +152,65 @@ func (m Model) updateSearch(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+ }
+ 
+ // updateSearchMatches recalculates matches for the current query.
+-// Only base (stored) events are searched — virtual occurrences of recurring
+-// events are not expanded, so each recurring event appears as a single match
+-// on its original date.
++// Titles, descriptions and notes are searched. Recurring events are expanded
++// into their occurrences (up to the recurrence end date, or one year from the
++// base date when open-ended) so results span the whole calendar instead of
++// only the event's original week.
+ func (m *Model) updateSearchMatches() {
+ 	m.searchMatches = nil
+ 	if m.searchQuery == "" {
+ 		return
+ 	}
+ 	query := strings.ToLower(m.searchQuery)
++	hits := func(ev Event) bool {
++		return strings.Contains(strings.ToLower(ev.Title), query) ||
++			strings.Contains(strings.ToLower(ev.Desc), query) ||
++			strings.Contains(strings.ToLower(ev.Notes), query)
++	}
+ 
+-	for date, events := range m.store.AllEvents() {
+-		for i, ev := range events {
+-			if strings.Contains(strings.ToLower(ev.Title), query) ||
+-				strings.Contains(strings.ToLower(ev.Desc), query) {
+-				m.searchMatches = append(m.searchMatches, SearchMatch{Date: date, Index: i, EventID: ev.ID})
++outer:
++	for _, events := range m.store.AllEvents() {
++		for _, ev := range events {
++			if !hits(ev) {
++				continue
++			}
++			appendMatch := func(d time.Time) {
++				m.searchMatches = append(m.searchMatches, SearchMatch{Date: d, StartMin: ev.StartMin, EventID: ev.ID})
++			}
++			if !ev.IsRecurring() {
++				appendMatch(DateKey(ev.Date))
++				continue
++			}
++			// Expand the recurring series into its occurrences.
++			base := DateKey(ev.Date)
++			end := base.AddDate(1, 0, 0)
++			if ev.RecurUntilStr != "" {
++				if until, err := time.Parse("2006-01-02", ev.RecurUntilStr); err == nil && until.Before(end) {
++					end = DateKey(until)
++				}
++			}
++			for d := base; !d.After(end); d = d.AddDate(0, 0, 1) {
++				if !d.Equal(base) && !matchesDate(ev, d) {
++					continue
++				}
++				appendMatch(d)
++			}
++			if len(m.searchMatches) > 2000 {
++				break outer
+ 			}
+ 		}
+ 	}
+ 
+-	// Sort matches by date then index for deterministic navigation order
++	// Sort matches by date then start time for deterministic navigation order
+ 	sort.Slice(m.searchMatches, func(i, j int) bool {
+-		if m.searchMatches[i].Date.Equal(m.searchMatches[j].Date) {
+-			return m.searchMatches[i].Index < m.searchMatches[j].Index
++		a, b := m.searchMatches[i], m.searchMatches[j]
++		if a.Date.Equal(b.Date) {
++			if a.StartMin == b.StartMin {
++				return a.EventID < b.EventID
++			}
++			return a.StartMin < b.StartMin
+ 		}
+-		return m.searchMatches[i].Date.Before(m.searchMatches[j].Date)
++		return a.Date.Before(b.Date)
+ 	})
+ }
+ 
+diff --git a/internal/storage.go b/internal/storage.go
+index c2b05ec..0b85c53 100644
+--- a/internal/storage.go
++++ b/internal/storage.go
+@@ -134,11 +134,13 @@ func DefaultKeybindingHelp() map[string]string {
+ 		"R":      "cycle recurrence backward",
+ 		"S":      "settings view",
+ 		"V":      "visual select",
++		"W":      "jump one week backward",
+ 		"Y":      "year view",
+ 		"/":      "search",
+ 		" ":      "space / confirm in menus",
+ 		"tab":    "cycle overlapping events",
+ 		"u":      "undo",
++		"w":      "jump one week forward",
+ 		"x":      "cut",
+ 		"y":      "copy",
+ 	}

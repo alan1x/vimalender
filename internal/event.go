@@ -53,6 +53,7 @@ type Event struct {
 	StartMin       int       `json:"start_min"`
 	EndMin         int       `json:"end_min"`
 	Notes          string    `json:"notes"`
+	Color          string    `json:"color,omitempty"` // optional per-event hex color; "" = global event_color
 	ID             string    `json:"id,omitempty"`
 	GroupID        string    `json:"group_id,omitempty"`
 	Recurrence     string    `json:"recurrence,omitempty"`
@@ -856,9 +857,9 @@ func (s *EventStore) EventCount(date time.Time) int {
 
 // SearchMatch represents a search result.
 type SearchMatch struct {
-	Date    time.Time
-	Index   int // index in GetByDate results for this date
-	EventID string
+	Date     time.Time
+	StartMin int // event start minute; orders matches within the same day
+	EventID  string
 }
 
 // AllEvents returns all events across all dates.

@@ -2,6 +2,7 @@ package internal
 
 import (
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 
@@ -235,23 +236,36 @@ func RenderMonth(m *Model) string {
 							cellContent = todayNumStyle.Render(cellContent)
 						}
 					} else if eventCount > 0 {
-						// Day number in normal, dots in color
+						// Day number in normal, dots in each event's color
 						plain := fmt.Sprintf(" %2d ", currentDay)
+						evs := m.store.GetByDate(date)
+						sort.SliceStable(evs, func(i, j int) bool { return evs[i].StartMin < evs[j].StartMin })
+						maxDots := 3
+						if cellWidth >= 14 {
+							maxDots = 5
+						}
 						dots := ""
-						for i := 0; i < eventCount && i < 3; i++ {
-							dots += "●"
+						visible := 0
+						for i := 0; i < len(evs) && i < maxDots; i++ {
+							dots += monthDotStyle(m, evs[i], isCursorWeek).Render("●")
+							visible++
 						}
-						if eventCount > 3 {
-							dots += "+"
+						if len(evs) > maxDots {
+							moreStyle := eventDotStyle
+							if isCursorWeek {
+								moreStyle = weekHighlightDot
+							}
+							dots += moreStyle.Render("+")
+							visible++
 						}
-						remaining := cellWidth - len(plain) - len([]rune(dots))
+						remaining := cellWidth - len(plain) - visible
 						if remaining < 0 {
 							remaining = 0
 						}
 						if isCursorWeek {
-							cellContent = weekHighlightDay.Render(plain) + weekHighlightDot.Render(dots) + weekHighlightBg.Render(fmt.Sprintf("%-*s", remaining, ""))
+							cellContent = weekHighlightDay.Render(plain) + dots + weekHighlightBg.Render(fmt.Sprintf("%-*s", remaining, ""))
 						} else {
-							cellContent = dayNumStyle.Render(plain) + eventDotStyle.Render(dots) + fmt.Sprintf("%-*s", remaining, "")
+							cellContent = dayNumStyle.Render(plain) + dots + fmt.Sprintf("%-*s", remaining, "")
 						}
 					} else {
 						if isCursorWeek {
@@ -263,6 +277,7 @@ func RenderMonth(m *Model) string {
 				} else if line == 1 && eventCount > 0 {
 					// Second line: show first event title (truncated)
 					events := m.store.GetByDate(date)
+					sort.SliceStable(events, func(i, j int) bool { return events[i].StartMin < events[j].StartMin })
 					title := events[0].Title
 					maxLen := cellWidth - 2
 					if maxLen < 1 {
@@ -306,6 +321,17 @@ func RenderMonth(m *Model) string {
 	}
 
 	return content
+}
+
+// monthDotStyle returns the style for one event marker dot in month view,
+// using the event's own color (or the global fallback) and preserving the
+// cursor-week background highlight when needed.
+func monthDotStyle(m *Model, ev Event, highlight bool) lipgloss.Style {
+	st := lipgloss.NewStyle().Foreground(lipgloss.Color(eventColorOf(m, ev)))
+	if highlight {
+		st = st.Background(lipgloss.Color("234"))
+	}
+	return st
 }
 
 // centerText centers text within a given width.

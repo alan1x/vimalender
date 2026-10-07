@@ -134,11 +134,13 @@ func DefaultKeybindingHelp() map[string]string {
 		"R":      "cycle recurrence backward",
 		"S":      "settings view",
 		"V":      "visual select",
+		"W":      "jump one week backward",
 		"Y":      "year view",
 		"/":      "search",
 		" ":      "space / confirm in menus",
 		"tab":    "cycle overlapping events",
 		"u":      "undo",
+		"w":      "jump one week forward",
 		"x":      "cut",
 		"y":      "copy",
 	}

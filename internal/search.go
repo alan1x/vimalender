@@ -152,31 +152,65 @@ func (m Model) updateSearch(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 }
 
 // updateSearchMatches recalculates matches for the current query.
-// Only base (stored) events are searched — virtual occurrences of recurring
-// events are not expanded, so each recurring event appears as a single match
-// on its original date.
+// Titles, descriptions and notes are searched. Recurring events are expanded
+// into their occurrences (up to the recurrence end date, or one year from the
+// base date when open-ended) so results span the whole calendar instead of
+// only the event's original week.
 func (m *Model) updateSearchMatches() {
 	m.searchMatches = nil
 	if m.searchQuery == "" {
 		return
 	}
 	query := strings.ToLower(m.searchQuery)
+	hits := func(ev Event) bool {
+		return strings.Contains(strings.ToLower(ev.Title), query) ||
+			strings.Contains(strings.ToLower(ev.Desc), query) ||
+			strings.Contains(strings.ToLower(ev.Notes), query)
+	}
 
-	for date, events := range m.store.AllEvents() {
-		for i, ev := range events {
-			if strings.Contains(strings.ToLower(ev.Title), query) ||
-				strings.Contains(strings.ToLower(ev.Desc), query) {
-				m.searchMatches = append(m.searchMatches, SearchMatch{Date: date, Index: i, EventID: ev.ID})
+outer:
+	for _, events := range m.store.AllEvents() {
+		for _, ev := range events {
+			if !hits(ev) {
+				continue
+			}
+			appendMatch := func(d time.Time) {
+				m.searchMatches = append(m.searchMatches, SearchMatch{Date: d, StartMin: ev.StartMin, EventID: ev.ID})
+			}
+			if !ev.IsRecurring() {
+				appendMatch(DateKey(ev.Date))
+				continue
+			}
+			// Expand the recurring series into its occurrences.
+			base := DateKey(ev.Date)
+			end := base.AddDate(1, 0, 0)
+			if ev.RecurUntilStr != "" {
+				if until, err := time.Parse("2006-01-02", ev.RecurUntilStr); err == nil && until.Before(end) {
+					end = DateKey(until)
+				}
+			}
+			for d := base; !d.After(end); d = d.AddDate(0, 0, 1) {
+				if !d.Equal(base) && !matchesDate(ev, d) {
+					continue
+				}
+				appendMatch(d)
+			}
+			if len(m.searchMatches) > 2000 {
+				break outer
 			}
 		}
 	}
 
-	// Sort matches by date then index for deterministic navigation order
+	// Sort matches by date then start time for deterministic navigation order
 	sort.Slice(m.searchMatches, func(i, j int) bool {
-		if m.searchMatches[i].Date.Equal(m.searchMatches[j].Date) {
-			return m.searchMatches[i].Index < m.searchMatches[j].Index
+		a, b := m.searchMatches[i], m.searchMatches[j]
+		if a.Date.Equal(b.Date) {
+			if a.StartMin == b.StartMin {
+				return a.EventID < b.EventID
+			}
+			return a.StartMin < b.StartMin
 		}
-		return m.searchMatches[i].Date.Before(m.searchMatches[j].Date)
+		return a.Date.Before(b.Date)
 	})
 }
 

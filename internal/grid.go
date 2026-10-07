@@ -55,6 +55,7 @@ func colWidthForIndex(col, dayCount, availWidth int) int {
 // RenderGrid renders the day grid with time gutter.
 // Each row represents MinutesPerRow() minutes.
 func RenderGrid(m *Model) string {
+	m.renderEvents = nil // reset per-event color context for this frame
 	gutterWidth := 6
 	availWidth := m.width - gutterWidth
 
@@ -343,7 +344,7 @@ func renderAllDaySegmentCell(m *Model, width int, left, right string, isStart, s
 		bg = "#2a2a3e"
 		fg = "#ffffff"
 	}
-	barColor := eventColor(m, 0)
+	barColor := globalEventColor(m)
 	if selected {
 		barColor = m.uiColor("accent", barColor)
 	}
@@ -672,6 +673,7 @@ func renderCell(m *Model, col, rowStartMin, rowEndMin, colWidth int,
 	layout map[int]EventLayout, events []Event, createLayout createPreviewLayout, showNowLine bool, suppressDecorations bool, visualRowIndex int, extraBeforeByRow []int) string {
 
 	isCursorRow := !suppressDecorations && col == m.cursorCol && m.cursorMin >= rowStartMin && m.cursorMin < rowEndMin
+	m.renderEvents = events // per-event colors resolve against this column's list
 	isVisualCell := isVisualCellSelected(m, col, rowStartMin, rowEndMin)
 
 	// Check create preview
@@ -997,25 +999,38 @@ func renderCreateWithEvents(m *Model, col int, hits []eventHit,
 	return strings.Join(subCols, "")
 }
 
-// eventColorStyle returns a style for an event using the first color in the palette.
+// eventColorStyle returns a style for an event at idx in the column being
+// rendered, honoring a per-event color when one is set.
 func eventColorStyle(m *Model, idx int) lipgloss.Style {
-	_ = idx
-	bg := m.settings.EventColor
-	if bg == "" {
-		bg = DefaultEventColor
-	}
 	return lipgloss.NewStyle().
-		Background(lipgloss.Color(bg)).
+		Background(lipgloss.Color(eventColor(m, idx))).
 		Foreground(lipgloss.Color("#ffffff"))
 }
 
-// eventColor returns the hex color for an event.
-func eventColor(m *Model, idx int) string {
-	_ = idx
+// globalEventColor returns the configured global event color.
+func globalEventColor(m *Model) string {
 	if m.settings.EventColor != "" {
 		return m.settings.EventColor
 	}
 	return DefaultEventColor
+}
+
+// eventColorOf returns the display color for a specific event: its own color
+// if set, otherwise the global event color.
+func eventColorOf(m *Model, ev Event) string {
+	if ev.Color != "" {
+		return ev.Color
+	}
+	return globalEventColor(m)
+}
+
+// eventColor returns the hex color for the event at idx in the day column
+// currently being rendered: its own color if set, otherwise the global one.
+func eventColor(m *Model, idx int) string {
+	if idx >= 0 && idx < len(m.renderEvents) {
+		return eventColorOf(m, m.renderEvents[idx])
+	}
+	return globalEventColor(m)
 }
 
 // EventRowPos indicates where a row falls within an event's visual span.
@@ -1189,7 +1204,7 @@ func renderNowLineSearchSelectedContent(m *Model, _ int, width int, pos EventRow
 }
 
 func renderNowLineAdjustContent(m *Model, width int, pos EventRowPos) string {
-	return renderNowLineBox(m, m.uiColor("accent", eventColor(m, 0)), eventBGColor(m), width, borderBarChar(m, pos))
+	return renderNowLineBox(m, m.uiColor("accent", globalEventColor(m)), eventBGColor(m), width, borderBarChar(m, pos))
 }
 
 func renderNowLineCreatePreviewContent(m *Model, width int) string {
@@ -1252,7 +1267,7 @@ func renderSearchSelectedContent(m *Model, idx int, text string, width int, pos 
 
 // renderAdjustContent renders an event in move mode with themed accent styling.
 func renderAdjustContent(m *Model, text string, width int, pos EventRowPos, rowStartMin int, fill rowFill) string {
-	adjustColor := m.uiColor("accent", eventColor(m, 0))
+	adjustColor := m.uiColor("accent", globalEventColor(m))
 	bgColor := eventBGColor(m)
 	if pos == EventRowSingle {
 		mpr := m.MinutesPerRow()

@@ -20,6 +20,7 @@ type editorResultMsg struct {
 	startMin   int
 	endMin     int
 	notes      string
+	color      string
 	recurrence string
 	recurUntil string
 	err        error
@@ -72,7 +73,7 @@ func (m *Model) openEditor(date time.Time, index int) tea.Cmd {
 		if err != nil {
 			return editorResultMsg{date: date, index: index, err: err}
 		}
-		title, desc, startMin, endMin, notes, recurrence, recurUntil, parseErr := parseEditorResult(tmpPath)
+		title, desc, startMin, endMin, notes, color, recurrence, recurUntil, parseErr := parseEditorResult(tmpPath)
 		return editorResultMsg{
 			date:       date,
 			index:      index,
@@ -81,6 +82,7 @@ func (m *Model) openEditor(date time.Time, index int) tea.Cmd {
 			startMin:   startMin,
 			endMin:     endMin,
 			notes:      notes,
+			color:      color,
 			recurrence: recurrence,
 			recurUntil: recurUntil,
 			err:        parseErr,
@@ -111,6 +113,7 @@ func formatEventForEditor(ev Event) string {
 	} else {
 		sb.WriteString("Until: \n")
 	}
+	sb.WriteString(fmt.Sprintf("Color: %s\n", ev.Color))
 	sb.WriteString("\n")
 	sb.WriteString("# Edit the fields above using these formats:\n")
 	sb.WriteString("#   Title: free text\n")
@@ -119,6 +122,7 @@ func formatEventForEditor(ev Event) string {
 	sb.WriteString("#   End: HH:MM\n")
 	sb.WriteString("#   Repeat: None, Daily, Weekdays, Weekly, Biweekly, Monthly, Yearly\n")
 	sb.WriteString("#   Until: YYYY-MM-DD or leave blank\n")
+	sb.WriteString("#   Color: hex like #a51d2d (blank = global event color)\n")
 	sb.WriteString("#\n")
 	sb.WriteString("# Write longer notes under the --- separator below.\n")
 	sb.WriteString("---\n")
@@ -128,10 +132,10 @@ func formatEventForEditor(ev Event) string {
 }
 
 // parseEditorResult reads the temp file and extracts event fields.
-func parseEditorResult(path string) (title string, desc string, startMin, endMin int, notes string, recurrence string, recurUntil string, err error) {
+func parseEditorResult(path string) (title string, desc string, startMin, endMin int, notes string, color string, recurrence string, recurUntil string, err error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
-		return "", "", 0, 0, "", "", "", fmt.Errorf("read editor file: %w", err)
+		return "", "", 0, 0, "", "", "", "", fmt.Errorf("read editor file: %w", err)
 	}
 
 	content := string(data)
@@ -156,18 +160,20 @@ func parseEditorResult(path string) (title string, desc string, startMin, endMin
 			val := strings.TrimSpace(strings.TrimPrefix(line, "Start:"))
 			startMin, err = parseTime(val)
 			if err != nil {
-				return "", "", 0, 0, "", "", "", fmt.Errorf("invalid start time %q: %w", val, err)
+				return "", "", 0, 0, "", "", "", "", fmt.Errorf("invalid start time %q: %w", val, err)
 			}
 		} else if strings.HasPrefix(line, "End:") {
 			val := strings.TrimSpace(strings.TrimPrefix(line, "End:"))
 			endMin, err = parseTime(val)
 			if err != nil {
-				return "", "", 0, 0, "", "", "", fmt.Errorf("invalid end time %q: %w", val, err)
+				return "", "", 0, 0, "", "", "", "", fmt.Errorf("invalid end time %q: %w", val, err)
 			}
 		} else if strings.HasPrefix(line, "Repeat:") {
 			repeatLabel = strings.TrimSpace(strings.TrimPrefix(line, "Repeat:"))
 		} else if strings.HasPrefix(line, "Until:") {
 			recurUntil = strings.TrimSpace(strings.TrimPrefix(line, "Until:"))
+		} else if strings.HasPrefix(line, "Color:") {
+			color = normalizeHexColor(strings.TrimSpace(strings.TrimPrefix(line, "Color:")))
 		}
 	}
 
@@ -177,7 +183,30 @@ func parseEditorResult(path string) (title string, desc string, startMin, endMin
 	if title == "" {
 		title = "Untitled"
 	}
-	return title, desc, startMin, endMin, notes, recurrence, recurUntil, nil
+	return title, desc, startMin, endMin, notes, color, recurrence, recurUntil, nil
+}
+
+// normalizeHexColor accepts "#rgb", "#rrggbb" (also bare without '#') and
+// returns a normalized "#rrggbb"-style string, or "" when invalid/blank.
+func normalizeHexColor(s string) string {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return ""
+	}
+	if !strings.HasPrefix(s, "#") {
+		s = "#" + s
+	}
+	switch len(s) {
+	case 4, 7, 9: // #rgb, #rrggbb, #rrggbbaa
+	default:
+		return ""
+	}
+	for _, r := range s[1:] {
+		if !strings.ContainsRune("0123456789abcdefABCDEF", r) {
+			return ""
+		}
+	}
+	return s
 }
 
 // parseLabelToRecurrence converts a human-readable label back to a recurrence constant.
